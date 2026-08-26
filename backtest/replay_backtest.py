@@ -31,6 +31,13 @@ use only execution messages, not cancels, to accumulate volume -- but
 it still assumes every unit of traded volume ahead of us actually
 depletes queue position, which is the standard (and correct) assumption
 for execution messages specifically.
+
+INTERFACE NOTE: strategies passed in here must implement
+desired_quotes(mid_price, time), wants_requote(mid_price, time),
+can_buy(), can_sell(), on_fill(side, price, size, time), and
+mark_to_market(mid_price). Both NaiveMarketMaker and AvellanedaStoikov
+implement this same interface, which is what lets this one harness run
+either strategy interchangeably for a head-to-head comparison.
 """
 import lob_engine as lob
 
@@ -71,7 +78,7 @@ class ReplayBacktest:
             self.strategy.active_ask_price = None
 
     def _place_quotes(self, time, mid):
-        bid_price, ask_price = self.strategy.desired_quotes(mid)
+        bid_price, ask_price = self.strategy.desired_quotes(mid, time)
 
         if self.strategy.can_buy():
             bid_id = self._next_id()
@@ -124,7 +131,7 @@ class ReplayBacktest:
             if mid is None:
                 continue
 
-            if self.strategy.wants_requote(mid):
+            if self.strategy.wants_requote(mid, event.time):
                 self._cancel_own_quotes()
                 self._place_quotes(event.time, mid)
 
