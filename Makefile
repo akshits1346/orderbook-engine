@@ -16,7 +16,13 @@ test: all
 	@echo "----------------------------------------"
 	./test_csv_replay
 
-clean:
-	rm -f test_reconstruction test_csv_replay
+order_book_bench: bench/order_book_bench.cpp src/order_book.cpp
+	$(CXX) $(CXXFLAGS) -o $@ $^
 
-.PHONY: all test clean
+bench: order_book_bench
+	./order_book_bench
+
+clean:
+	rm -f test_reconstruction test_csv_replay order_book_bench
+
+.PHONY: all test bench clean

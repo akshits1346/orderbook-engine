@@ -16,9 +16,31 @@
 //   order at the back of the queue (loses time priority). This matches
 //   real exchange matching rules and is exactly the kind of detail
 //   interviewers ask about, so make sure you can explain why.
+//
+// - COMPLEXITY, and a bug that was here and got fixed: cancelPartial /
+//   deleteOrder / executeOrder all go id -> its order in O(log P) via
+//   index_ (P = number of distinct price levels), then must mutate or
+//   remove THAT SPECIFIC order within its level's queue. The first
+//   version of this file stored orders in a std::deque and looked the
+//   id up with a LINEAR SCAN through the deque -- meaning cancel/
+//   execute were actually O(log P + k), k = orders resting at that
+//   exact price level, not O(log P) as originally documented here.
+//   That's wrong for any operation that isn't add: a std::deque
+//   iterator is invalidated by insertion/erasure anywhere in the
+//   deque except at the very ends, so there was no way to cache a
+//   stable position to jump to directly.
+//   Fix: PriceLevel now uses std::list, whose iterators stay valid
+//   under insertion/erasure ANYWHERE ELSE in the list (only the
+//   erased element's own iterator is invalidated). index_ stores that
+//   iterator directly (via OrderLocation::it), so cancelPartial /
+//   deleteOrder / executeOrder go straight to the order with no scan:
+//   true O(log P) (the map lookup for eraseLevelIfEmpty), not O(log P
+//   + k). See bench/order_book_bench.cpp for the measurement that
+//   caught this (latency growing with orders-per-level, not staying
+//   flat) and confirms the fix.
 
 #include <cstdint>
-#include <deque>
+#include <list>
 #include <map>
 #include <optional>
 #include <unordered_map>
@@ -37,7 +59,11 @@ struct Order {
 };
 
 struct PriceLevel {
-    std::deque<Order> orders; // front = earliest = highest time priority
+    std::list<Order> orders; // front = earliest = highest time priority
+                             // (std::list, not std::deque: erasing/mutating
+                             // by a cached iterator must be O(1) and must not
+                             // invalidate OTHER orders' cached iterators --
+                             // see the COMPLEXITY note above)
 
     int64_t totalSize() const {
         int64_t s = 0;
@@ -54,6 +80,8 @@ struct BookLevel {
 struct OrderLocation {
     Side side;
     int64_t price;
+    std::list<Order>::iterator it; // direct handle to this order within its
+                                    // level's queue -- O(1) access, no scan
 };
 
 class OrderBook {
