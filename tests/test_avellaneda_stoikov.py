@@ -82,6 +82,45 @@ def main():
     check(spread3 < spread1,
           f"spread narrows as session end approaches ({spread3} < {spread1})")
 
+    # Case 4 -- rolling horizon: horizon=5 caps T-t at 5 even at time=0,
+    # session_end_time=10 (so T-t would otherwise be 10). Quotes should
+    # come out IDENTICAL to case 3 (inventory=0, effective T-t=5),
+    # even though we're evaluating at time=0, not time=5.
+    cfg_horizon = AvellanedaStoikovConfig(
+        gamma=0.01, kappa=0.3, sigma=200,
+        session_end_time=10, horizon=5, tick_size=100, quote_size=100,
+    )
+    strategy_horizon = AvellanedaStoikov(cfg_horizon)
+    strategy_horizon.inventory = 0
+    bid4, ask4 = strategy_horizon.desired_quotes(1000000, time=0)
+    check(bid4 == bid3 and ask4 == ask3,
+          f"horizon=5 at time=0 matches fixed-horizon T-t=5 case: "
+          f"got ({bid4}, {ask4}), want ({bid3}, {ask3})")
+
+    # Case 5 -- rolling horizon never WIDENS the spread vs the
+    # fixed-session-end version: capping T-t can only shrink it.
+    cfg_uncapped = AvellanedaStoikovConfig(
+        gamma=0.01, kappa=0.3, sigma=200,
+        session_end_time=10, tick_size=100, quote_size=100,
+    )
+    strategy_uncapped = AvellanedaStoikov(cfg_uncapped)
+    bid_u, ask_u = strategy_uncapped.desired_quotes(1000000, time=0)
+    spread_uncapped = ask_u - bid_u
+    spread_horizon = ask4 - bid4
+    check(spread_horizon <= spread_uncapped,
+          f"horizon-capped spread ({spread_horizon}) <= uncapped spread "
+          f"({spread_uncapped}) at the same (time, session_end_time)")
+
+    # Case 6 -- once t is close enough to session_end_time that natural
+    # T-t already falls below the horizon cap, horizon has no effect
+    # (min(small, horizon) == small) -- rolling horizon only ever
+    # tightens, matching fixed-horizon behavior in the near-close regime.
+    strategy_horizon.inventory = 0
+    bid6, ask6 = strategy_horizon.desired_quotes(1000000, time=9)
+    bid6_fixed, ask6_fixed = strategy_uncapped.desired_quotes(1000000, time=9)
+    check(bid6 == bid6_fixed and ask6 == ask6_fixed,
+          "horizon has no effect once natural T-t is already below the cap")
+
     print()
     if failures == 0:
         print("All Avellaneda-Stoikov formula checks passed.")

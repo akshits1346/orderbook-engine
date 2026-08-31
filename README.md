@@ -61,9 +61,13 @@ make test                      # C++ engine: 22 checks (reconstruction + CSV rep
 ./build_bindings.sh            # compile the Python extension
 python3 tests/test_bindings.py       # 15 checks: Python bridge agrees with C++
 python3 tests/test_naive_mm.py       # 6 checks: naive strategy + fill model
-python3 tests/test_avellaneda_stoikov.py  # 8 checks: AS formula correctness
+python3 tests/test_avellaneda_stoikov.py  # 11 checks: AS formula + rolling horizon
 python3 tests/test_calibrate.py      # 4 checks: sigma/kappa fitting math
 ```
+
+`*.so`, the compiled C++ test binaries, and `__pycache__` are gitignored
+build products, not checked in -- run the two build steps above before
+`python3 tests/*.py` or the backtest scripts.
 
 ## The actual finding
 
@@ -99,9 +103,33 @@ This is a known, documented practical limitation of the textbook AS
 model: it was derived for a single-asset end-of-day liquidation
 horizon, and the `T - t` term can dominate badly over short horizons
 unless gamma is chosen very small or the horizon is redefined (e.g. a
-short rolling window instead of full session end) -- both real
-adjustments a production implementation would need to make, and
-neither of which this repo has implemented yet (see below).
+short rolling window instead of full session end).
+
+**Testing the fix directly: does a rolling horizon restore fills at a
+sane gamma, instead of requiring an unrealistically tiny one?**
+`strategies/avellaneda_stoikov.py` now takes an optional `horizon`
+parameter that caps `T - t` at that many seconds instead of letting it
+grow unbounded toward a fixed session close (`horizon=None` reproduces
+the original behavior exactly -- see `backtest/run_horizon_comparison.py`).
+Sweeping horizon at the *same* `gamma=0.01` that produced zero fills above:
+
+| horizon (s) | half-spread @ session start (ticks) | fills |
+|---|---|---|
+| None (fixed session end) | 61.0 | 0 |
+| 30 | 15.0 | 0 |
+| 10 | 5.0 | 1 |
+| 5 | 2.0 | 1 |
+| 2 | 1.0 | 1 |
+| 1 | 1.0 | 1 |
+
+Capping the horizon at 10 seconds or less restores fills at
+`gamma=0.01` -- the model's own "reasonable default" -- without touching
+gamma at all. This confirms the hypothesis: the pathology is specifically
+the *unbounded* `T - t` term from a fixed, far-off session close, not a
+flaw in the gamma value itself. It's still fewer fills than the naive
+baseline's 4 in this window (a fixed 1-tick half-spread is simply more
+willing to trade in a session this short), which is itself worth stating
+plainly rather than declaring the fix a win -- see caveats below.
 
 ## Honest limitations
 
@@ -115,21 +143,20 @@ neither of which this repo has implemented yet (see below).
 - **The fill model is a standard approximation** (queue-position /
   volume-based), not exact L3 matching -- see the detailed caveat in
   `backtest/replay_backtest.py`.
-- **AS's horizon is fixed to full-session-end.** A rolling shorter
-  horizon (re-anchoring `T` every N seconds instead of using one fixed
-  session close) is the natural next experiment, given the finding
-  above.
+- **The rolling-horizon sweep above uses one fixed `horizon` per run,
+  chosen by hand.** It isn't calibrated (e.g. to the timescale over
+  which sigma/kappa are themselves stable) -- it demonstrates the
+  mechanism, not an optimized horizon length.
 - **No transaction costs or adverse selection modeling** in the
   backtest yet.
 
 ## What I'd build next
 
 - Swap in real LOBSTER sample data and re-run calibration + comparison
-- Implement a rolling-horizon variant of Avellaneda-Stoikov and compare
-  it against the fixed-session-end version, to directly test whether
-  that's actually the fix for the gamma sensitivity found above
 - Add transaction costs to the backtest
 - Multi-day robustness: run the same comparison across several
   different days/sessions rather than one window, to see whether the
   naive-beats-AS-at-default-gamma result holds up or was specific to
   this one window
+- Calibrate the horizon length itself (rather than hand-picking it),
+  e.g. from how quickly the fitted sigma/kappa drift over the session
