@@ -38,7 +38,7 @@ from backtest.generate_synthetic_data import generate_realistic_lobster_data
 
 
 def run_one_seed(seed, tmp_path, n_events=2000, gamma=0.01, tick_size=100,
-                  quote_size=100, max_inventory=500, rolling_horizon=10.0):
+                  quote_size=100, max_inventory=500, rolling_horizon=10.0, fee_bps=0.0):
     generate_realistic_lobster_data(n_events=n_events, seed=seed, output_path=tmp_path)
     events = lob.read_message_file(tmp_path)
     if len(events) < 20:
@@ -72,25 +72,26 @@ def run_one_seed(seed, tmp_path, n_events=2000, gamma=0.01, tick_size=100,
 
     results = {}
     for name, strat in strategies.items():
-        history = ReplayBacktest(events, strat).run()
+        history = ReplayBacktest(events, strat, fee_bps=fee_bps).run()
         final_mtm = history[-1][1] if history else 0.0
         results[name] = {"fills": len(strat.fills), "final_mtm": final_mtm}
     return results
 
 
-def main(n_seeds=50, n_events=2000):
+def main(n_seeds=50, n_events=2000, fee_bps=0.0):
     all_results = {"naive": [], "as_fixed": [], "as_rolling": []}
 
     with tempfile.NamedTemporaryFile(suffix=".csv") as f:
         for seed in range(n_seeds):
-            r = run_one_seed(seed, tmp_path=f.name, n_events=n_events)
+            r = run_one_seed(seed, tmp_path=f.name, n_events=n_events, fee_bps=fee_bps)
             if r is None:
                 continue
             for name in all_results:
                 all_results[name].append(r[name])
 
     n = len(all_results["naive"])
-    print(f"Ran {n} independent synthetic sessions (of {n_seeds} attempted, {n_events} events each)\n")
+    fee_note = f", fee_bps={fee_bps}" if fee_bps else " (fee-free)"
+    print(f"Ran {n} independent synthetic sessions (of {n_seeds} attempted, {n_events} events each{fee_note})\n")
 
     print(f"{'strategy':<12} {'mean fills':>11} {'sessions w/ fills':>18} {'mean final MTM':>16} {'median final MTM':>18}")
     print("-" * 80)
@@ -114,4 +115,8 @@ def main(n_seeds=50, n_events=2000):
 
 
 if __name__ == "__main__":
-    main()
+    main(fee_bps=0.0)
+    print("\n" + "=" * 80)
+    print("Same 50 seeds, with a realistic 1.0 bps (0.01%) per-fill transaction cost:")
+    print("=" * 80 + "\n")
+    main(fee_bps=1.0)

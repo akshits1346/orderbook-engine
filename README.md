@@ -68,6 +68,7 @@ python3 tests/test_naive_mm.py       # 6 checks: naive strategy + fill model
 python3 tests/test_avellaneda_stoikov.py  # 11 checks: AS formula + rolling horizon
 python3 tests/test_calibrate.py      # 4 checks: sigma/kappa fitting math
 python3 tests/test_synthetic_data_realism.py  # 7 checks: fat tails + volatility clustering
+python3 tests/test_transaction_costs.py       # 7 checks: fee_bps deduction/rebate math
 ```
 
 `*.so`, the compiled C++ test binaries, and `__pycache__` are gitignored
@@ -272,6 +273,30 @@ limitation of the backtest's fill model interacting with the strategy,
 not a flaw in either piece considered alone -- see "Honest limitations"
 and "What I'd build next" below for what actually fixes it.
 
+## Transaction costs
+
+`ReplayBacktest` takes an optional `fee_bps` (basis points of notional,
+charged to the strategy's cash on every fill; see
+`tests/test_transaction_costs.py`). Rerunning the same 50-seed sweep at
+a realistic 1.0 bps per fill:
+
+| strategy | mean final MTM, fee-free | mean final MTM, 1.0 bps |
+|---|---|---|
+| naive | 71,847.83 | 35,560.13 |
+| as_fixed | 44,673.91 | 42,500.02 |
+| as_rolling | -211,086.96 | -220,651.72 |
+
+Naive's mean PnL is cut roughly in half by a 1 bp fee; `as_fixed` and
+`as_rolling` barely move. That's not surprising once you look at fill
+counts (naive: 3.63 fills/session; `as_fixed`: 0.22; `as_rolling`:
+0.96) -- fee drag scales with how often a strategy actually trades, and
+naive trades roughly 4x more often than `as_rolling` and 16x more often
+than `as_fixed` in this data. Naive still wins on average at this fee
+level (it started from a much larger edge), but "naive beats AS" is
+visibly not fee-invariant, and a high enough per-fill cost would flip
+it -- worth remembering before reading either result as a permanent
+statement about which approach is better.
+
 ## Honest limitations
 
 - **None of the findings above use real market data.**
@@ -322,6 +347,7 @@ and "What I'd build next" below for what actually fixes it.
 - Real LOBSTER sample data, the moment it's reachable from wherever
   this runs next -- see the honest-limitations note on why it isn't
   here now, and that no code changes are needed once it is
-- Add transaction costs to the backtest
 - Calibrate the horizon length itself (rather than hand-picking it),
   e.g. from how quickly the fitted sigma/kappa drift over the session
+- Sweep fee_bps further (the 1.0 bps point above is one sample, not a
+  curve) to find the actual breakeven fee where naive's edge flips

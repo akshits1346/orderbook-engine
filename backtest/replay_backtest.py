@@ -38,15 +38,35 @@ can_buy(), can_sell(), on_fill(side, price, size, time), and
 mark_to_market(mid_price). Both NaiveMarketMaker and AvellanedaStoikov
 implement this same interface, which is what lets this one harness run
 either strategy interchangeably for a head-to-head comparison.
+
+TRANSACTION COSTS: optional, via the fee_bps constructor argument (0.0
+by default -- every existing test and comparison is fee-free unless it
+explicitly opts in). See the ReplayBacktest.__init__ docstring and
+tests/test_transaction_costs.py.
 """
 import lob_engine as lob
 
 
 class ReplayBacktest:
-    def __init__(self, events, strategy):
+    def __init__(self, events, strategy, fee_bps: float = 0.0):
+        """
+        fee_bps: transaction cost per fill, in basis points of notional
+        (price * size), deducted from the strategy's cash immediately
+        after on_fill(). 1 bp = 0.01%; a typical maker fee/rebate for a
+        liquidity-providing limit order is on this order of magnitude
+        (single-digit bps, sometimes negative -- a rebate -- for adding
+        liquidity, which this parameter can represent too by passing a
+        negative value). Applied here, at the backtest level, rather
+        than inside each strategy's on_fill: transaction cost is a
+        property of the EXECUTION VENUE, not the strategy's quoting
+        logic, so every strategy gets it identically without needing to
+        know about fees itself. See tests/test_transaction_costs.py.
+        """
         self.events = events
         self.strategy = strategy
         self.book = lob.OrderBook()
+        self.fee_bps = fee_bps
+        self.total_fees_paid = 0.0
 
         self._next_own_id = -1  # counts down: -1, -2, -3, ... never collides with LOBSTER's positive ids
         self._bid_volume_since_quote = 0
@@ -59,6 +79,13 @@ class ReplayBacktest:
     def _next_id(self):
         self._next_own_id -= 1
         return self._next_own_id
+
+    def _charge_fee(self, price, size):
+        if self.fee_bps == 0.0:
+            return
+        fee = abs(price) * size * (self.fee_bps / 10000.0)
+        self.strategy.cash -= fee
+        self.total_fees_paid += fee
 
     def _mid(self):
         bid = self.book.best_bid()
@@ -110,6 +137,7 @@ class ReplayBacktest:
                 fill_size = self.strategy.cfg.quote_size
                 self.book.delete_order(self.strategy.active_bid_id)
                 self.strategy.on_fill("buy", self.strategy.active_bid_price, fill_size, event.time)
+                self._charge_fee(self.strategy.active_bid_price, fill_size)
                 self.strategy.active_bid_id = None
                 self.strategy.active_bid_price = None
 
@@ -119,6 +147,7 @@ class ReplayBacktest:
                 fill_size = self.strategy.cfg.quote_size
                 self.book.delete_order(self.strategy.active_ask_id)
                 self.strategy.on_fill("sell", self.strategy.active_ask_price, fill_size, event.time)
+                self._charge_fee(self.strategy.active_ask_price, fill_size)
                 self.strategy.active_ask_id = None
                 self.strategy.active_ask_price = None
 
