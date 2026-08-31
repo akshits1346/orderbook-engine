@@ -33,6 +33,18 @@ choices, not a real finding about the model. This file uses whatever
 config is passed to it; calibrating sigma/kappa from data is a
 separate, explicit step (see backtest/calibrate.py) that must be done
 before the comparison means anything.
+
+ROLLING HORIZON -- the practical fix for the gamma-sensitivity finding
+documented in the README: with a fixed `session_end_time`, T-t grows
+without bound the further you are from that fixed clock time, so the
+inventory-risk term (proportional to T-t) can dominate arbitrarily
+badly early in a long session. Setting `horizon` caps T-t at that many
+seconds, re-anchoring "time remaining" every tick to "at most `horizon`
+seconds of risk," rather than "seconds until one fixed session close."
+This is the standard practical adjustment referenced in the AS
+literature for exactly this failure mode. horizon=None (the default)
+reproduces the original fixed-session-end behavior unchanged --
+this is an additive, backward-compatible option, not a replacement.
 """
 import math
 from dataclasses import dataclass
@@ -44,6 +56,8 @@ class AvellanedaStoikovConfig:
     kappa: float               # order arrival decay -- calibrate from data, don't guess
     sigma: float                # volatility, LOBSTER price units per second -- calibrate from data
     session_end_time: float     # absolute time (LOBSTER 'seconds since midnight' units) the session ends
+    horizon: float = None        # if set, caps T-t at this many seconds (rolling horizon) instead of
+                                  # letting it grow unbounded toward session_end_time; see module docstring
     tick_size: int = 100
     quote_size: int = 100
     max_inventory: int = 500
@@ -62,11 +76,14 @@ class AvellanedaStoikov:
         self.fills = []
 
     def _time_remaining(self, time: float) -> float:
+        remaining = self.cfg.session_end_time - time
+        if self.cfg.horizon is not None:
+            remaining = min(remaining, self.cfg.horizon)
         # Floor at a tiny positive value rather than 0 or negative --
         # the formulas divide by nothing here, but a negative T-t would
         # produce a nonsensical negative spread, which is worth guarding
         # against explicitly rather than letting it happen silently.
-        return max(self.cfg.session_end_time - time, 1e-6)
+        return max(remaining, 1e-6)
 
     def _reservation_price(self, mid_price: int, time: float) -> float:
         T_minus_t = self._time_remaining(time)

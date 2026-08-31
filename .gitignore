@@ -1,0 +1,12 @@
+# Build artifacts (build with `make test` and `./build_bindings.sh`,
+# not committed since they're platform-specific)
+*.so
+test_csv_replay
+test_reconstruction
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
