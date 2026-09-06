@@ -6,6 +6,21 @@ answer a specific question: does Avellaneda-Stoikov's inventory-aware
 quoting actually beat a naive symmetric market maker, when both are
 tested against the same replayed order flow with a real fill model?
 
+## Related projects in this repo
+
+Two standalone quant research projects live alongside this one, each
+with its own build, tests, and README:
+
+- [`vol-surface-engine/`](vol-surface-engine/README.md) -- a Heston
+  stochastic-vol pricer (cross-validated against Monte Carlo),
+  SVI/SSVI implied-vol surface fitting with explicit no-arbitrage
+  diagnostics, and a delta-hedging simulator that measures the real
+  cost of fixed-vol hedging under stochastic volatility.
+- [`stat-arb-lab/`](stat-arb-lab/README.md) -- cointegration testing,
+  a from-scratch Kalman filter for time-varying pairs hedge ratios,
+  and a PCA-based multi-asset stat-arb signal (Avellaneda & Lee) with
+  a genuine walk-forward backtest engine.
+
 ## Architecture
 
 ```
